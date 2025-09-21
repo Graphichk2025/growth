@@ -1,353 +1,461 @@
 import streamlit as st
-import google.generativeai as genai
-import PyPDF2
-import io
-import json
-import re
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import google.generativeai as genai
+import PyPDF2
+import io
+import base64
 from datetime import datetime
+import re
 
-# Configure the page
-st.set_page_config(page_title="AI Career Advisor", page_icon="🚀", layout="wide")
+# Page configuration
+st.set_page_config(
+    page_title="AI Resume Analyzer",
+    page_icon="📄",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# Initialize Gemini AI
-genai.configure(api_key="AIzaSyBHiuLjXp3gtW8QK6xqfJgaHtL4APKfGaQ")
+# Initialize session state for theme
+if 'theme' not in st.session_state:
+    st.session_state.theme = 'light'
 
-# Initialize session state
-if 'resume_text' not in st.session_state:
-    st.session_state.resume_text = ""
-if 'analysis' not in st.session_state:
-    st.session_state.analysis = {}
-if 'recommendations' not in st.session_state:
-    st.session_state.recommendations = []
+# Function to toggle theme
+def toggle_theme():
+    if st.session_state.theme == 'light':
+        st.session_state.theme = 'dark'
+    else:
+        st.session_state.theme = 'light'
 
-# Helper functions
-def get_gemini_response(prompt):
-    model = genai.GenerativeModel('gemini-pro')
-    response = model.generate_content(prompt)
-    return response.text
+# Custom CSS based on theme
+def apply_theme():
+    if st.session_state.theme == 'dark':
+        st.markdown("""
+        <style>
+            .main {
+                background-color: #0E1117;
+                color: #FAFAFA;
+            }
+            .stApp {
+                background-color: #0E1117;
+            }
+            .main-header {
+                font-size: 3rem;
+                color: #3B82F6;
+                text-align: center;
+                margin-bottom: 2rem;
+            }
+            .analysis-card {
+                background-color: #262730;
+                border-radius: 10px;
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+                color: #FAFAFA;
+            }
+            .metric-card {
+                background-color: #1E2130;
+                border-radius: 10px;
+                padding: 1rem;
+                margin: 0.5rem;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                text-align: center;
+                color: #FAFAFA;
+            }
+            .recommendation-card {
+                background-color: #1E2A3A;
+                border-left: 4px solid #3B82F6;
+                border-radius: 5px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                color: #FAFAFA;
+            }
+            .stButton button {
+                background-color: #3B82F6;
+                color: white;
+                font-weight: bold;
+            }
+            .resume-section {
+                background-color: #1A1D29;
+                border-radius: 10px;
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                color: #FAFAFA;
+            }
+            .best-job-card {
+                background: linear-gradient(135deg, #1E3A8A 0%, #3B82F6 100%);
+                border-radius: 10px;
+                padding: 2rem;
+                margin-bottom: 2rem;
+                text-align: center;
+                color: white;
+            }
+            .job-match-card {
+                background-color: #1E2130;
+                border-radius: 10px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                color: #FAFAFA;
+            }
+            h1, h2, h3, h4, h5, h6, p, div, span {
+                color: #FAFAFA !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <style>
+            .main {
+                background-color: #FFFFFF;
+                color: #31333F;
+            }
+            .stApp {
+                background-color: #FFFFFF;
+            }
+            .main-header {
+                font-size: 3rem;
+                color: #1E40AF;
+                text-align: center;
+                margin-bottom: 2rem;
+            }
+            .analysis-card {
+                background-color: #F3F4F6;
+                border-radius: 10px;
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                color: #31333F;
+            }
+            .metric-card {
+                background-color: #FFFFFF;
+                border-radius: 10px;
+                padding: 1rem;
+                margin: 0.5rem;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+                text-align: center;
+                color: #31333F;
+            }
+            .recommendation-card {
+                background-color: #EFF6FF;
+                border-left: 4px solid #3B82F6;
+                border-radius: 5px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                color: #31333F;
+            }
+            .stButton button {
+                background-color: #3B82F6;
+                color: white;
+                font-weight: bold;
+            }
+            .resume-section {
+                background-color: #F9FAFB;
+                border-radius: 10px;
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+                color: #31333F;
+            }
+            .best-job-card {
+                background: linear-gradient(135deg, #1E40AF 0%, #3B82F6 100%);
+                border-radius: 10px;
+                padding: 2rem;
+                margin-bottom: 2rem;
+                text-align: center;
+                color: white;
+            }
+            .job-match-card {
+                background-color: #FFFFFF;
+                border-radius: 10px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                color: #31333F;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+            h1, h2, h3, h4, h5, h6, p, div, span {
+                color: #31333F !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
 
+# Initialize Gemini API (you'll need to replace with your actual API key)
+def setup_gemini():
+    try:
+        # In a real app, you would use st.secrets to securely store your API key
+        # For demo purposes, we're using a placeholder
+        api_key = "your_gemini_api_key_here"  # Replace with your actual API key
+        genai.configure(api_key=api_key)
+        return genai.GenerativeModel('gemini-pro')
+    except:
+        st.warning("Gemini API not configured. Using demo mode.")
+        return None
+
+# Extract text from PDF
 def extract_text_from_pdf(uploaded_file):
-    pdf_reader = PyPDF2.PdfReader(io.BytesIO(uploaded_file.read()))
-    text = ""
-    for page in pdf_reader.pages:
-        text += page.extract_text() + "\n"
-    return text
-
-def analyze_resume(resume_text):
-    prompt = f"""
-    Analyze this resume and extract key information:
-    {resume_text}
-    
-    Return a JSON object with:
-    1. "skills": list of technical and soft skills
-    2. "experience": summary of work experience
-    3. "education": educational background
-    4. "strengths": 3-5 key strengths
-    5. "improvement_areas": 3-5 areas for improvement
-    6. "current_role": current or most recent job title
-    7. "experience_years": years of experience
-    
-    Format the response as valid JSON only.
-    """
     try:
-        response = get_gemini_response(prompt)
-        json_match = re.search(r'\{.*\}', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        return {"skills": [], "experience": "", "education": "", "strengths": [], "improvement_areas": []}
-    except:
-        return {"skills": [], "experience": "", "education": "", "strengths": [], "improvement_areas": []}
+        pdf_reader = PyPDF2.PdfReader(uploaded_file)
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+        return text
+    except Exception as e:
+        st.error(f"Error extracting text from PDF: {e}")
+        return None
 
-def generate_recommendations(analysis):
-    prompt = f"""
-    Based on this resume analysis: {json.dumps(analysis)}
+# Analyze resume with Gemini
+def analyze_resume_with_gemini(resume_text):
+    # This is a simulation since we don't have a real API key
+    # In a real application, you would use the Gemini API
     
-    Generate career recommendations with:
-    1. "next_role": suggested next career move
-    2. "reason": why this role is a good fit
-    3. "skills_match": percentage match with current skills (0-100)
-    4. "skills_to_develop": list of skills needed for this role
-    5. "learning_resources": suggested resources to acquire these skills
-    6. "salary_range": expected salary range for this role
-    7. "job_growth": job market outlook for this role
+    # Simulate API response delay
+    import time
+    time.sleep(2)
     
-    Return the response as a valid JSON array with 3 recommendations.
-    """
-    try:
-        response = get_gemini_response(prompt)
-        json_match = re.search(r'\[.*\]', response, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        return []
-    except:
-        return []
-
-def calculate_resume_score(analysis):
-    base_score = 70
-    skills = analysis.get('skills', [])
-    experience = analysis.get('experience', '')
-    education = analysis.get('education', '')
+    # Simulated response based on common resume patterns
+    skills = ["Python", "JavaScript", "SQL", "Machine Learning", "Data Analysis", "React", "AWS"]
+    experience = 3.5
+    education_level = "Bachelor's"
     
-    # Score based on number of skills
-    if len(skills) > 10:
-        base_score += 10
-    elif len(skills) > 5:
-        base_score += 5
+    # Simulate career recommendations
+    recommendations = [
+        "Consider highlighting your machine learning projects more prominently",
+        "Add metrics to quantify your achievements (e.g., 'Improved performance by 25%')",
+        "Include more industry-specific keywords for ATS optimization",
+        "Consider obtaining AWS certification to enhance your cloud skills"
+    ]
     
-    # Score based on experience description
-    if len(experience) > 100:
-        base_score += 10
-    elif len(experience) > 50:
-        base_score += 5
-        
-    # Ensure score is between 0-100
-    return min(100, base_score)
-
-def get_job_market_data():
+    # Simulate career matches
+    career_matches = [
+        {"role": "Data Scientist", "match": 85, "reason": "Strong background in machine learning and data analysis"},
+        {"role": "Machine Learning Engineer", "match": 78, "reason": "Good programming skills and ML experience"},
+        {"role": "Software Developer", "match": 72, "reason": "Solid programming foundation but limited software engineering experience"},
+        {"role": "Data Analyst", "match": 68, "reason": "Good analytical skills but could benefit from more visualization experience"},
+        {"role": "DevOps Engineer", "match": 55, "reason": "Some cloud experience but limited DevOps tools knowledge"}
+    ]
+    
+    # Find best job match
+    best_job = max(career_matches, key=lambda x: x['match'])
+    
+    # Simulate skill analysis
+    skill_categories = {
+        "Technical Skills": 82,
+        "Soft Skills": 75,
+        "Leadership": 68,
+        "Industry Knowledge": 60
+    }
+    
+    # Simulate resume score
+    resume_score = 76
+    
     return {
-        "high_demand_skills": [
-            "Python", "Machine Learning", "Cloud Computing", "Data Analysis", 
-            "AI Development", "Cybersecurity", "DevOps", "React", "SQL"
-        ],
-        "growing_fields": [
-            "Artificial Intelligence", "Data Science", "Cloud Engineering",
-            "Cybersecurity", "Digital Marketing", "UX/UI Design"
-        ],
-        "salary_trends": {
-            "Data Scientist": "$120,000 - $180,000",
-            "Software Engineer": "$110,000 - $170,000",
-            "AI Engineer": "$130,000 - $190,000",
-            "Cloud Architect": "$130,000 - $200,000",
-            "DevOps Engineer": "$120,000 - $180,000"
-        }
+        "skills": skills,
+        "experience": experience,
+        "education_level": education_level,
+        "recommendations": recommendations,
+        "career_matches": career_matches,
+        "best_job": best_job,
+        "skill_categories": skill_categories,
+        "resume_score": resume_score
     }
 
-# UI Components
-def render_header():
-    st.title("🤖 AI Career Advisor")
-    st.markdown("Upload your resume and get personalized career guidance for the evolving job market")
-    st.markdown("---")
+# Display analysis results
+def display_analysis_results(analysis):
+    st.markdown('<h2 class="main-header">Resume Analysis Results</h2>', unsafe_allow_html=True)
+    
+    # Best job match
+    st.markdown(f"""
+    <div class="best-job-card">
+        <h2>🎯 Best Career Match</h2>
+        <h1>{analysis['best_job']['role']}</h1>
+        <h3>{analysis['best_job']['match']}% Match</h3>
+        <p>{analysis['best_job']['reason']}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Overall score
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>Resume Score</h3>
+            <h2 style="color: #3B82F6;">{analysis['resume_score']}/100</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>Years of Experience</h3>
+            <h2 style="color: #3B82F6;">{analysis['experience']}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <h3>Education Level</h3>
+            <h2 style="color: #3B82F6;">{analysis['education_level']}</h2>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Career matches chart
+    st.subheader("Career Path Matches")
+    career_df = pd.DataFrame(analysis['career_matches'])
+    fig = px.bar(career_df, x='role', y='match', title='Career Match Percentage',
+                 labels={'role': 'Career Role', 'match': 'Match %'},
+                 color='match', color_continuous_scale='Blues')
+    fig.update_layout(plot_bgcolor='rgba(0,0,0,0)' if st.session_state.theme == 'light' else '#0E1117',
+                     paper_bgcolor='rgba(0,0,0,0)' if st.session_state.theme == 'light' else '#0E1117',
+                     font=dict(color='#31333F' if st.session_state.theme == 'light' else '#FAFAFA'))
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Detailed job matches
+    st.subheader("Detailed Job Matches")
+    for job in analysis['career_matches']:
+        st.markdown(f"""
+        <div class="job-match-card">
+            <h4>{job['role']} - {job['match']}% Match</h4>
+            <p>{job['reason']}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Skills radar chart
+    st.subheader("Skill Categories Assessment")
+    skill_categories = analysis['skill_categories']
+    categories = list(skill_categories.keys())
+    values = list(skill_categories.values())
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatterpolar(
+        r=values + [values[0]],
+        theta=categories + [categories[0]],
+        fill='toself',
+        name='Skill Assessment',
+        line_color='#3B82F6'
+    ))
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100]
+            )),
+        showlegend=False,
+        plot_bgcolor='rgba(0,0,0,0)' if st.session_state.theme == 'light' else '#0E1117',
+        paper_bgcolor='rgba(0,0,0,0)' if st.session_state.theme == 'light' else '#0E1117',
+        font=dict(color='#31333F' if st.session_state.theme == 'light' else '#FAFAFA')
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Skills list
+    st.subheader("Detected Skills")
+    cols = st.columns(3)
+    for i, skill in enumerate(analysis['skills']):
+        with cols[i % 3]:
+            st.markdown(f"- {skill}")
+    
+    # Recommendations
+    st.subheader("Improvement Recommendations")
+    for rec in analysis['recommendations']:
+        st.markdown(f"""
+        <div class="recommendation-card">
+            <p>{rec}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Best resume techniques
+    st.subheader("Best Resume Techniques")
+    techniques = [
+        "Use action verbs to start each bullet point (e.g., 'Developed', 'Implemented', 'Managed')",
+        "Quantify achievements with numbers and metrics whenever possible",
+        "Tailor your resume to each specific job application",
+        "Include relevant keywords from the job description",
+        "Keep your resume concise (1-2 pages maximum)",
+        "Use a clean, professional layout with consistent formatting",
+        "Highlight your most relevant experiences and skills at the top",
+        "Include a skills section with both technical and soft skills",
+        "Proofread carefully for spelling and grammar errors",
+        "Include links to your portfolio, GitHub, or LinkedIn profile"
+    ]
+    
+    for technique in techniques:
+        st.markdown(f"- {technique}")
 
-def render_resume_upload():
-    st.header("📄 Upload Your Resume")
-    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+# Main application
+def main():
+    # Apply theme
+    apply_theme()
+    
+    # Theme toggle button
+    theme_emoji = "🌙" if st.session_state.theme == 'light' else "☀️"
+    if st.button(f"{theme_emoji} Toggle Theme"):
+        toggle_theme()
+        st.rerun()
+    
+    st.markdown('<h1 class="main-header">AI Resume Analyzer</h1>', unsafe_allow_html=True)
+    st.markdown("### Upload your resume for AI-powered analysis and career recommendations")
+    
+    # Initialize Gemini
+    model = setup_gemini()
+    
+    # File upload
+    uploaded_file = st.file_uploader("Choose a PDF resume", type="pdf")
     
     if uploaded_file is not None:
-        with st.spinner("Extracting text from resume..."):
-            resume_text = extract_text_from_pdf(uploaded_file)
-            st.session_state.resume_text = resume_text
+        # Extract text from PDF
+        resume_text = extract_text_from_pdf(uploaded_file)
+        
+        if resume_text:
+            # Display extracted text (optional)
+            with st.expander("View extracted resume text"):
+                st.text(resume_text[:1000] + "..." if len(resume_text) > 1000 else resume_text)
             
-        with st.spinner("Analyzing resume..."):
-            st.session_state.analysis = analyze_resume(resume_text)
-            
-        with st.spinner("Generating recommendations..."):
-            st.session_state.recommendations = generate_recommendations(st.session_state.analysis)
-        
-        st.success("Resume analysis complete!")
-
-def render_resume_score():
-    if not st.session_state.analysis:
-        return
-        
-    score = calculate_resume_score(st.session_state.analysis)
-    
-    st.header("📊 Resume Score")
-    
-    fig = go.Figure(go.Indicator(
-        mode = "gauge+number+delta",
-        value = score,
-        domain = {'x': [0, 1], 'y': [0, 1]},
-        title = {'text': "Overall Resume Score"},
-        gauge = {
-            'axis': {'range': [0, 100]},
-            'bar': {'color': "darkblue"},
-            'steps': [
-                {'range': [0, 50], 'color': "lightcoral"},
-                {'range': [50, 80], 'color': "lightyellow"},
-                {'range': [80, 100], 'color': "lightgreen"}
-            ],
-            'threshold': {
-                'line': {'color': "red", 'width': 4},
-                'thickness': 0.75,
-                'value': 90
-            }
-        }
-    ))
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("✅ Strengths")
-        for strength in st.session_state.analysis.get('strengths', []):
-            st.success(f"• {strength}")
-    
-    with col2:
-        st.subheader("📈 Improvement Areas")
-        for area in st.session_state.analysis.get('improvement_areas', []):
-            st.info(f"• {area}")
-
-def render_skills_analysis():
-    if not st.session_state.analysis:
-        return
-        
-    skills = st.session_state.analysis.get('skills', [])
-    job_market_data = get_job_market_data()
-    high_demand_skills = job_market_data['high_demand_skills']
-    
-    matched_skills = [skill for skill in skills if skill in high_demand_skills]
-    missing_skills = [skill for skill in high_demand_skills if skill not in skills]
-    
-    st.header("🔧 Skills Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("Your Skills")
-        for skill in skills:
-            if skill in high_demand_skills:
-                st.success(f"• {skill} ✅ (High Demand)")
-            else:
-                st.write(f"• {skill}")
-    
-    with col2:
-        st.subheader("High Demand Skills You're Missing")
-        for skill in missing_skills[:5]:
-            st.error(f"• {skill} ⚠️")
-        
-        if len(missing_skills) > 5:
-            st.info(f"Plus {len(missing_skills) - 5} more high-demand skills")
-
-def render_career_recommendations():
-    if not st.session_state.recommendations:
-        return
-        
-    st.header("🚀 Career Recommendations")
-    
-    for i, rec in enumerate(st.session_state.recommendations):
-        with st.expander(f"{rec.get('next_role', 'Unknown Role')} - {rec.get('skills_match', 0)}% Match", expanded=i==0):
-            col1, col2 = st.columns([2, 1])
-            
-            with col1:
-                st.subheader(rec.get('next_role', ''))
-                st.write(f"**Why this role:** {rec.get('reason', '')}")
-                
-                st.write("**Skills to Develop:**")
-                for skill in rec.get('skills_to_develop', [])[:3]:
-                    st.write(f"- {skill}")
-                
-                st.write("**Learning Resources:**")
-                for resource in rec.get('learning_resources', [])[:2]:
-                    st.write(f"- {resource}")
-            
-            with col2:
-                st.metric("Salary Range", rec.get('salary_range', ''))
-                st.metric("Job Growth", rec.get('job_growth', ''))
-                
-                # Skills match gauge
-                fig = go.Figure(go.Indicator(
-                    mode = "gauge+number",
-                    value = rec.get('skills_match', 0),
-                    domain = {'x': [0, 1], 'y': [0, 1]},
-                    title = {'text': "Skills Match"},
-                    gauge = {
-                        'axis': {'range': [0, 100]},
-                        'bar': {'color': "darkblue"},
-                        'steps': [
-                            {'range': [0, 50], 'color': "lightcoral"},
-                            {'range': [50, 80], 'color': "lightyellow"},
-                            {'range': [80, 100], 'color': "lightgreen"}
-                        ]
-                    }
-                ))
-                fig.update_layout(height=200, margin=dict(l=10, r=10, t=30, b=10))
-                st.plotly_chart(fig, use_container_width=True)
-
-def render_job_market_insights():
-    job_market_data = get_job_market_data()
-    
-    st.header("📈 Job Market Insights")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("High Demand Skills")
-        for skill in job_market_data['high_demand_skills']:
-            st.write(f"• {skill}")
-    
-    with col2:
-        st.subheader("Growing Fields")
-        for field in job_market_data['growing_fields']:
-            st.write(f"• {field}")
-    
-    st.subheader("Salary Trends")
-    salary_data = []
-    for role, salary in job_market_data['salary_trends'].items():
-        # Extract average salary for visualization
-        avg_salary = int(''.join(filter(str.isdigit, salary.split('-')[0]))) / 1000
-        salary_data.append({'Role': role, 'Average Salary (K)': avg_salary})
-    
-    if salary_data:
-        df = pd.DataFrame(salary_data)
-        fig = px.bar(df, x='Role', y='Average Salary (K)', title='Average Salary by Role')
-        st.plotly_chart(fig, use_container_width=True)
-
-def render_career_path():
-    if not st.session_state.analysis:
-        return
-        
-    current_role = st.session_state.analysis.get('current_role', 'Current Position')
-    
-    st.header("🧭 Career Path Projection")
-    
-    # Create a simple career path visualization
-    path_data = {
-        'Stage': ['Current', 'Next 1-2 Years', 'Next 3-5 Years', 'Future'],
-        'Role': [
-            current_role,
-            st.session_state.recommendations[0]['next_role'] if st.session_state.recommendations else 'Mid-level Position',
-            'Senior Position',
-            'Leadership Position'
-        ],
-        'Focus': [
-            'Master Current Role',
-            'Develop New Skills',
-            'Gain Specialization',
-            'Strategic Leadership'
-        ]
-    }
-    
-    df = pd.DataFrame(path_data)
-    
-    fig = px.scatter(df, x='Stage', y='Role', size=[10, 15, 20, 25], 
-                     hover_data=['Focus'], title='Suggested Career Path')
-    st.plotly_chart(fig, use_container_width=True)
-
-# Main app
-def main():
-    render_header()
-    
-    tab1, tab2, tab3 = st.tabs(["Resume Analysis", "Career Recommendations", "Job Market"])
-    
-    with tab1:
-        render_resume_upload()
-        if st.session_state.resume_text:
-            render_resume_score()
-            render_skills_analysis()
-    
-    with tab2:
-        if st.session_state.resume_text:
-            render_career_recommendations()
-            render_career_path()
+            # Analyze button
+            if st.button("Analyze Resume", type="primary"):
+                with st.spinner("Analyzing your resume with AI..."):
+                    # Analyze resume
+                    analysis = analyze_resume_with_gemini(resume_text)
+                    
+                    # Display results
+                    display_analysis_results(analysis)
         else:
-            st.info("Upload your resume to get career recommendations")
-    
-    with tab3:
-        render_job_market_insights()
+            st.error("Could not extract text from the PDF. Please try another file.")
+    else:
+        # Show demo analysis
+        st.info("👆 Upload a PDF resume to get started, or see a demo analysis below")
+        
+        if st.button("Show Demo Analysis"):
+            # Create demo analysis
+            demo_analysis = {
+                "skills": ["Python", "JavaScript", "SQL", "Machine Learning", "Data Analysis", "React", "AWS", "Docker", "Git", "TensorFlow"],
+                "experience": 4.2,
+                "education_level": "Master's",
+                "recommendations": [
+                    "Add more quantifiable achievements to your work experience",
+                    "Include a projects section to showcase your technical skills",
+                    "Consider adding a summary section at the top of your resume",
+                    "Tailor your skills section to include more industry-specific keywords"
+                ],
+                "career_matches": [
+                    {"role": "Data Scientist", "match": 92, "reason": "Excellent combination of machine learning skills and data analysis experience"},
+                    {"role": "Machine Learning Engineer", "match": 88, "reason": "Strong programming skills and experience with ML frameworks"},
+                    {"role": "Data Engineer", "match": 85, "reason": "Good data handling skills and cloud experience"},
+                    {"role": "Software Developer", "match": 78, "reason": "Solid programming foundation but limited large-scale system experience"},
+                    {"role": "Data Analyst", "match": 75, "reason": "Good analytical skills but could benefit from more business domain knowledge"}
+                ],
+                "best_job": {"role": "Data Scientist", "match": 92, "reason": "Excellent combination of machine learning skills and data analysis experience"},
+                "skill_categories": {
+                    "Technical Skills": 90,
+                    "Data Analysis": 85,
+                    "Machine Learning": 88,
+                    "Cloud Computing": 75,
+                    "Software Development": 82
+                },
+                "resume_score": 84
+            }
+            
+            # Display demo results
+            display_analysis_results(demo_analysis)
 
 if __name__ == "__main__":
     main()
